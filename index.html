@@ -1128,19 +1128,6 @@ function loadState() {
     if (custom) state.customLabels = JSON.parse(custom);
     const targets = localStorage.getItem('aii_metal_proj_targets');
     if (targets) state.projTargets = JSON.parse(targets);
-    const yearsObj = {};
-    // Backward compat: old single-blob key
-    const yearsBlob = localStorage.getItem('aii_metal_years');
-    if (yearsBlob) { try { Object.assign(yearsObj, JSON.parse(yearsBlob)); } catch(e) {} }
-    // Per-year keys (new format)
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('aii_metal_years_')) {
-        const yr = parseInt(k.replace('aii_metal_years_', ''));
-        if (yr) { try { yearsObj[yr] = JSON.parse(localStorage.getItem(k)); } catch(e) {} }
-      }
-    }
-    if (Object.keys(yearsObj).length) state.years = yearsObj;
     const excluded = localStorage.getItem('aii_metal_excluded_codes');
     if (excluded) state.excludedCodes = JSON.parse(excluded);
     const renamed = localStorage.getItem('aii_metal_renamed_cats');
@@ -1150,22 +1137,54 @@ function loadState() {
 function saveExcludedCodes() {
   localStorage.setItem('aii_metal_excluded_codes', JSON.stringify(state.excludedCodes));
 }
+// ─── IndexedDB helpers for sales year data ───
+const _IDB_NAME = 'AII_Metal_DB';
+const _IDB_STORE = 'years';
+function _openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_IDB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(_IDB_STORE);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
 function saveYears() {
-  try {
-    // Clear all previous year keys (single-blob and per-year) before saving
-    const toRemove = [];
+  _openIDB().then(db => {
+    const tx = db.transaction(_IDB_STORE, 'readwrite');
+    const store = tx.objectStore(_IDB_STORE);
+    store.clear();
+    Object.entries(state.years).forEach(([yr, data]) => store.put(data, Number(yr)));
+  }).catch(e => alert('Could not save year data: ' + e.message));
+}
+function loadYearsFromIDB() {
+  return _openIDB().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(_IDB_STORE, 'readonly');
+    const store = tx.objectStore(_IDB_STORE);
+    const keysReq = store.getAllKeys();
+    const valsReq = store.getAll();
+    tx.oncomplete = () => {
+      const keys = keysReq.result || [];
+      const vals = valsReq.result || [];
+      if (keys.length) {
+        const yearsObj = {};
+        keys.forEach((k, i) => { yearsObj[k] = vals[i]; });
+        state.years = yearsObj;
+      }
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  })).catch(() => {
+    // Fallback: read old localStorage per-year keys if IDB unavailable
+    const yearsObj = {};
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && (k === 'aii_metal_years' || k.startsWith('aii_metal_years_'))) toRemove.push(k);
+      if (k && k.startsWith('aii_metal_years_')) {
+        const yr = parseInt(k.replace('aii_metal_years_', ''));
+        if (yr) { try { yearsObj[yr] = JSON.parse(localStorage.getItem(k)); } catch(e) {} }
+      }
     }
-    toRemove.forEach(k => localStorage.removeItem(k));
-    // Save each year as its own key to stay under the quota
-    Object.entries(state.years).forEach(([yr, data]) => {
-      localStorage.setItem('aii_metal_years_' + yr, JSON.stringify(data));
-    });
-  } catch(e) {
-    alert('Could not save year data to localStorage (may be too large): ' + e.message);
-  }
+    if (Object.keys(yearsObj).length) state.years = yearsObj;
+  });
 }
 function saveLabels() {
   localStorage.setItem('aii_metal_labels', JSON.stringify(state.itemLabels));
@@ -3677,11 +3696,13 @@ loadState();
 Object.entries(state.renamedCats).forEach(([orig, renamed]) => {
   if (CAT_COLORS[orig]) { CAT_COLORS[renamed] = CAT_COLORS[orig]; delete CAT_COLORS[orig]; }
 });
-updateUI();
-updateCustomLabelsList();
-updateExcludedCodesList();
-initItemDetailTypeahead();
-initCustomTypeahead();
+loadYearsFromIDB().then(() => {
+  updateUI();
+  updateCustomLabelsList();
+  updateExcludedCodesList();
+  initItemDetailTypeahead();
+  initCustomTypeahead();
+});
 
 
 // Add input listener for new label enter key
