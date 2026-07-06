@@ -1128,8 +1128,19 @@ function loadState() {
     if (custom) state.customLabels = JSON.parse(custom);
     const targets = localStorage.getItem('aii_metal_proj_targets');
     if (targets) state.projTargets = JSON.parse(targets);
-    const years = localStorage.getItem('aii_metal_years');
-    if (years) state.years = JSON.parse(years);
+    const yearsObj = {};
+    // Backward compat: old single-blob key
+    const yearsBlob = localStorage.getItem('aii_metal_years');
+    if (yearsBlob) { try { Object.assign(yearsObj, JSON.parse(yearsBlob)); } catch(e) {} }
+    // Per-year keys (new format)
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('aii_metal_years_')) {
+        const yr = parseInt(k.replace('aii_metal_years_', ''));
+        if (yr) { try { yearsObj[yr] = JSON.parse(localStorage.getItem(k)); } catch(e) {} }
+      }
+    }
+    if (Object.keys(yearsObj).length) state.years = yearsObj;
     const excluded = localStorage.getItem('aii_metal_excluded_codes');
     if (excluded) state.excludedCodes = JSON.parse(excluded);
     const renamed = localStorage.getItem('aii_metal_renamed_cats');
@@ -1141,7 +1152,17 @@ function saveExcludedCodes() {
 }
 function saveYears() {
   try {
-    localStorage.setItem('aii_metal_years', JSON.stringify(state.years));
+    // Clear all previous year keys (single-blob and per-year) before saving
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k === 'aii_metal_years' || k.startsWith('aii_metal_years_'))) toRemove.push(k);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+    // Save each year as its own key to stay under the quota
+    Object.entries(state.years).forEach(([yr, data]) => {
+      localStorage.setItem('aii_metal_years_' + yr, JSON.stringify(data));
+    });
   } catch(e) {
     alert('Could not save year data to localStorage (may be too large): ' + e.message);
   }
