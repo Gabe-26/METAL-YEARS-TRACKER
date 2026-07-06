@@ -1518,6 +1518,16 @@ function getAllCategories() {
     .filter(c => seen.has(c));
 }
 
+// Like getAllCategories but always includes custom labels even if empty (for reassignment dropdowns)
+function getAssignableCategories() {
+  const base = getAllCategories();
+  const baseSet = new Set(base);
+  const extras = state.customLabels
+    .map(c => state.renamedCats[c] || c)
+    .filter(c => !baseSet.has(c));
+  return [...base, ...extras];
+}
+
 function getOriginalCatName(displayName) {
   // Given a display name (possibly renamed), find the original key
   const entry = Object.entries(state.renamedCats).find(([orig, disp]) => disp === displayName);
@@ -1736,7 +1746,7 @@ function bulkExclude() {
 function bulkReassignPrompt(e) {
   e.stopPropagation();
   const dd = document.getElementById('catDropdown');
-  const cats = getAllCategories();
+  const cats = getAssignableCategories();
   dd.innerHTML = cats.map(c =>
     `<div class="cat-select-opt" onclick="bulkAssignCat('${c}')">
       <div class="cat-dot" style="background:${getCatColor(c)};"></div>${c}
@@ -2037,7 +2047,7 @@ document.getElementById('filterProdLine').addEventListener('change', e => {
 // ═══════════════════════════════════════════════
 function showCatDropdown(code, item, x, y) {
   const dd = document.getElementById('catDropdown');
-  const cats = getAllCategories();
+  const cats = getAssignableCategories();
   const current = getEffectiveCat(code, item);
   dd.innerHTML = cats.map(c =>
     `<div class="cat-select-opt ${c===current?'active':''}" onclick="assignCat('${code}','${c}')">
